@@ -10,18 +10,22 @@ Usage examples:
 """
 
 import argparse
+import json
 import pathlib
 import shutil
 import subprocess
 import sys
 
-SRCS_DIR = pathlib.Path("verilog")
-FRAMEWORK_ITEMS = [".devcontainer", ".vscode", "Makefile", "build.py"]
+with open('build.config.json', 'r') as f:
+    config = json.load(f)
+frameworkFiles = config['frameworkFiles']
+
+sourceDirectory = pathlib.Path(config['sourceDirectory'])
 
 def find_sources():
     # rglob returns a generator; concatenate by converting to lists first
-    svs = list(SRCS_DIR.rglob("*.sv"))
-    vs  = list(SRCS_DIR.rglob("*.v"))
+    svs = list(sourceDirectory.rglob("*.sv"))
+    vs  = list(sourceDirectory.rglob("*.v"))
     return svs + vs
 
 
@@ -70,7 +74,7 @@ def open_wave(vcd: pathlib.Path):
 
 def install(dir_: pathlib.Path):
     dir_.mkdir(parents=True, exist_ok=True)
-    for item in FRAMEWORK_ITEMS:
+    for item in frameworkFiles:
         src = pathlib.Path(item)
         dest = dir_ / src.name
         if src.is_dir():
@@ -78,12 +82,12 @@ def install(dir_: pathlib.Path):
         else:
             shutil.copy2(src, dest)
     with open(dir_ / ".verilog_framework_installed", "w") as f:
-        f.write("\n".join(FRAMEWORK_ITEMS))
+        f.write("\n".join(frameworkFiles))
     print("installed to", dir_)
 
 
 def uninstall(dir_: pathlib.Path):
-    for item in FRAMEWORK_ITEMS:
+    for item in frameworkFiles:
         target = dir_ / item
         if target.exists():
             if target.is_dir():
