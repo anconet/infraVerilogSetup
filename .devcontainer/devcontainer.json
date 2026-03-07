@@ -1,0 +1,25 @@
+{
+    "name": "SystemVerilog Dev",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "remoteUser": "vscode",
+    "containerUser": "vscode",
+    "runArgs": [
+        "--name",
+        "systemVerilogDev"
+    ],
+    "remoteEnv": {
+        "LANG": "C.UTF-8"
+    },
+    "postCreateCommand": "./.devcontainer/post-create.sh",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "mshr-h.veriloghdl",
+                "ms-python.python",
+                "mhutchie.git-graph"
+            ]
+        }
+    }
+}
