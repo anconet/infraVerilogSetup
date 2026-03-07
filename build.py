@@ -16,8 +16,7 @@ import subprocess
 import sys
 
 SRCS_DIR = pathlib.Path("verilog")
-FRAMEWORK_ITEMS = [".devcontainer", ".vscode", "Makefile"]
-
+FRAMEWORK_ITEMS = [".devcontainer", ".vscode", "Makefile", "build.py"]
 
 def find_sources():
     # rglob returns a generator; concatenate by converting to lists first
