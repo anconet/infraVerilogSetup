@@ -1,9 +1,3 @@
 {
-    "frameworkFiles": [
-        ".devcontainer",
-        ".vscode",
-        "build.py",
-        "build.config.json"
-    ],
-    "sourceDirectory": "verilog"
+    "sourceDirectory": "source"
 }

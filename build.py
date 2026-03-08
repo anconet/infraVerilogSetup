@@ -18,7 +18,6 @@ import sys
 
 with open('build.config.json', 'r') as f:
     config = json.load(f)
-frameworkFiles = config['frameworkFiles']
 
 sourceDirectory = pathlib.Path(config['sourceDirectory'])
 
@@ -30,7 +29,7 @@ def find_sources():
 
 
 def find_tbs():
-    return [p for p in find_sources() if p.name.endswith("_tb.sv") or p.name.endswith("_tb.v")]
+    return [p for p in find_sources() if "_tb" in p.name or ".test" in p.name]
 
 
 def basename(p: pathlib.Path) -> str:
@@ -72,7 +71,25 @@ def open_wave(vcd: pathlib.Path):
     subprocess.check_call(["gtkwave", str(vcd)])
 
 
+def check_installConfigJson():
+    if pathlib.Path("install.config.json").exists() == False:
+        print("install.config.json not found")
+        print("This likely means you are trying to run the install or uninstall option from the directory that that the framework was installed into.")
+        sys.exit(1)
+
+
+def get_framework_files():
+    with open('install.config.json', 'r') as f:
+        install_config = json.load(f)
+    return install_config['frameworkFiles']
+
+
 def install(dir_: pathlib.Path):
+
+    check_installConfigJson()
+
+    frameworkFiles = get_framework_files()
+    
     dir_.mkdir(parents=True, exist_ok=True)
     for item in frameworkFiles:
         src = pathlib.Path(item)
@@ -87,6 +104,10 @@ def install(dir_: pathlib.Path):
 
 
 def uninstall(dir_: pathlib.Path):
+    check_installConfigJson()
+    
+    frameworkFiles = get_framework_files()
+    
     for item in frameworkFiles:
         target = dir_ / item
         if target.exists():
@@ -159,7 +180,6 @@ def main():
         clean()
     else:
         parser.print_help()
-
 
 if __name__ == "__main__":
     main()
