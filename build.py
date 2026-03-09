@@ -16,27 +16,28 @@ import shutil
 import subprocess
 import sys
 
-with open('build.config.json', 'r') as f:
-    config = json.load(f)
+def get_source_directory():
+    with open('build.config.json', 'r') as f:
+        config = json.load(f)
+    return pathlib.Path(config['sourceDirectory'])
 
-sourceDirectory = pathlib.Path(config['sourceDirectory'])
 
-def find_sources():
+def find_sources(sourceDirectory: pathlib.Path):
     # rglob returns a generator; concatenate by converting to lists first
     svs = list(sourceDirectory.rglob("*.sv"))
     vs  = list(sourceDirectory.rglob("*.v"))
     return svs + vs
 
 
-def find_tbs():
-    return [p for p in find_sources() if "_tb" in p.name or ".test" in p.name]
+def find_tbs(sourceDirectory: pathlib.Path):
+    return [p for p in find_sources(sourceDirectory) if "_tb" in p.name or ".test" in p.name]
 
 
 def basename(p: pathlib.Path) -> str:
     return p.with_suffix("")
 
 
-def compile_tb(tb: pathlib.Path):
+def compile_tb(tb: pathlib.Path, sourceDirectory: pathlib.Path):
     """Compile a testbench along with every other source file.
 
     This mirrors the Makefile which uses all of $(SRCS) as inputs so that
@@ -47,17 +48,16 @@ def compile_tb(tb: pathlib.Path):
     vcd = tb.with_suffix(".vcd")
     # gather every Verilog/SystemVerilog source so the tb can reference them
     # the tb itself will be added explicitly later to avoid duplicates
-    sources = [str(p) for p in find_sources() if p != tb]
+    sources = [str(p) for p in find_sources(sourceDirectory) if p != tb]
     # include the VCD filename quoted, similar to how the Makefile did it
-    macro = f'-DVCD_FILE="{vcd}"'
     cmd = [
         "iverilog",
         "-g2012",
-        macro,
+        f'-DVCD_FILE="{vcd}"',
         "-o",
         str(out),
     ] + sources + [str(tb)]
-    print("compiling", tb)
+    print("compiling", tb, "with", cmd)
     subprocess.check_call(cmd)
     return out
 
@@ -122,8 +122,8 @@ def uninstall(dir_: pathlib.Path):
     print("uninstalled from", dir_)
 
 
-def clean():
-    for tb in find_tbs():
+def clean(sourceDirectory: pathlib.Path):
+    for tb in find_tbs(sourceDirectory):
         out = tb.with_suffix(".out")
         vcd = tb.with_suffix(".vcd")
         for f in (out, vcd):
@@ -138,35 +138,38 @@ def main():
     parser.add_argument("--dir", default="..", help="installation directory")
     args = parser.parse_args()
 
-    tbs = find_tbs()
-    if not tbs and args.target in ("all", "run", "waveform"):
+    sourceDirectory = get_source_directory()
+
+    testBenches = find_tbs(sourceDirectory)
+
+    if not testBenches and args.target in ("all", "run", "waveform"):
         print("no testbenches found")
         sys.exit(1)
 
     if args.target == "all":
-        for tb in tbs:
-            compile_tb(tb)
+        for tb in testBenches:
+            compile_tb(tb, sourceDirectory)
     elif args.target == "run":
-        for tb in tbs:
+        for tb in testBenches:
             out = tb.with_suffix(".out")
             if not out.exists():
-                compile_tb(tb)
+                compile_tb(tb, sourceDirectory)
             run_tb(out)
     elif args.target == "waveform":
         # replicate Makefile behaviour: build & run first TB if needed
-        if tbs:
-            tb = tbs[0]
+        if testBenches:
+            tb = testBenches[0]
             first_vcd = tb.with_suffix(".vcd")
             out = tb.with_suffix(".out")
             if not first_vcd.exists():
                 # compile and run the tb to generate the VCD
                 if not out.exists():
-                    compile_tb(tb)
+                    compile_tb(tb, sourceDirectory)
                 run_tb(out)
             open_wave(first_vcd)
     elif args.target.startswith("wave-"):
         name = args.target.split("-", 1)[1]
-        for tb in tbs:
+        for tb in testBenches:
             if tb.stem == name:
                 open_wave(tb.with_suffix(".vcd"))
                 break
@@ -177,7 +180,7 @@ def main():
     elif args.target == "uninstall":
         uninstall(pathlib.Path(args.dir))
     elif args.target == "clean":
-        clean()
+        clean(sourceDirectory)
     else:
         parser.print_help()
 
