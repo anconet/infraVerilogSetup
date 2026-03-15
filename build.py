@@ -46,9 +46,10 @@ def compile_tb(tb: pathlib.Path, sourceDirectory: pathlib.Path):
     """
     out = tb.with_suffix(".out")
     vcd = tb.with_suffix(".vcd")
-    # gather every Verilog/SystemVerilog source so the tb can reference them
-    # the tb itself will be added explicitly later to avoid duplicates
-    sources = [str(p) for p in find_sources(sourceDirectory) if p != tb]
+    # Exclude all testbench files here; add only the target tb at the end.
+    # This avoids multiple top-level benches in one simulation image.
+    testbenches = set(find_tbs(sourceDirectory))
+    sources = [str(p) for p in find_sources(sourceDirectory) if p not in testbenches]
     # include the VCD filename quoted, similar to how the Makefile did it
     cmd = [
         "iverilog",
