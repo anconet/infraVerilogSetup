@@ -56,25 +56,38 @@ def compile_tb(tb: pathlib.Path, sourceDirectory: pathlib.Path):
     testbenches = set(find_tbs(sourceDirectory))
     sources = [str(p) for p in find_sources(sourceDirectory) if p not in testbenches]
     # include the VCD filename quoted, similar to how the Makefile did it
-    cmd = [
-        "iverilog",
-        "-g2012",
-        f'-DVCD_FILE="{vcd}"',
-        "-o",
-        str(out),
-    ] + sources + [str(tb)]
-    print("compiling", tb, "with", cmd)
+    cmd = (
+        [
+            "iverilog",
+            "-g2012",
+            f'-DVCD_FILE="{vcd}"',
+            "-o",
+            str(out),
+        ]
+        + sources
+        + [str(tb)]
+    )
+    print("+", subprocess.list2cmdline(cmd))
     subprocess.check_call(cmd)
     return out
 
 
 def run_tb(out: pathlib.Path):
-    print("running", out)
-    subprocess.check_call(["vvp", str(out)])
+    cmd = [
+        "vvp",
+        str(out),
+    ]
+    print("+", subprocess.list2cmdline(cmd))
+    subprocess.check_call(cmd)
 
 
 def open_wave(vcd: pathlib.Path):
-    subprocess.check_call(["gtkwave", str(vcd)])
+    cmd = [
+        "gtkwave",
+        str(vcd),
+    ]
+    print("+", subprocess.list2cmdline(cmd))
+    subprocess.check_call(cmd)
 
 
 def check_installConfigJson():
