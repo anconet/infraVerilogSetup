@@ -1,7 +1,11 @@
 {
     "sourceDirectory": "source",
-    "testbenchPatterns": [
+    "testbenchSuffixes": [
         "_tb",
         ".test"
+    ],
+    "includeSuffixes": [
+        ".include.json",
+        "_inc.json"
     ]
 }
