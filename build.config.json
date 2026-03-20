@@ -1,3 +1,7 @@
 {
-    "sourceDirectory": "source"
+    "sourceDirectory": "source",
+    "testbenchPatterns": [
+        "_tb",
+        ".test"
+    ]
 }

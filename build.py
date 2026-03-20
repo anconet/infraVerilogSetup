@@ -16,10 +16,17 @@ import shutil
 import subprocess
 import sys
 
-def get_source_directory():
+def get_build_config():
     with open('build.config.json', 'r') as f:
-        config = json.load(f)
-    return pathlib.Path(config['sourceDirectory'])
+        return json.load(f)
+
+
+def get_source_directory():
+    return pathlib.Path(get_build_config()['sourceDirectory'])
+
+
+def get_testbench_patterns():
+    return get_build_config().get('testbenchPatterns', ['_tb', '.test'])
 
 
 def find_sources(sourceDirectory: pathlib.Path):
@@ -29,12 +36,10 @@ def find_sources(sourceDirectory: pathlib.Path):
     return svs + vs
 
 
-def find_tbs(sourceDirectory: pathlib.Path):
-    return [p for p in find_sources(sourceDirectory) if "_tb" in p.name or ".test" in p.name]
-
-
-def basename(p: pathlib.Path) -> str:
-    return p.with_suffix("")
+def find_tbs(sourceDirectory: pathlib.Path, patterns: list = None):
+    if patterns is None:
+        patterns = get_testbench_patterns()
+    return [p for p in find_sources(sourceDirectory) if any(pat in p.name for pat in patterns)]
 
 
 def compile_tb(tb: pathlib.Path, sourceDirectory: pathlib.Path):
@@ -147,43 +152,44 @@ def main():
         print("no testbenches found")
         sys.exit(1)
 
-    if args.target == "all":
-        for tb in testBenches:
-            compile_tb(tb, sourceDirectory)
-    elif args.target == "run":
-        for tb in testBenches:
-            out = tb.with_suffix(".out")
-            if not out.exists():
+    match args.target:
+        case "all":
+            for tb in testBenches:
                 compile_tb(tb, sourceDirectory)
-            run_tb(out)
-    elif args.target == "waveform":
-        # replicate Makefile behaviour: build & run first TB if needed
-        if testBenches:
-            tb = testBenches[0]
-            first_vcd = tb.with_suffix(".vcd")
-            out = tb.with_suffix(".out")
-            if not first_vcd.exists():
-                # compile and run the tb to generate the VCD
+        case "run":
+            for tb in testBenches:
+                out = tb.with_suffix(".out")
                 if not out.exists():
                     compile_tb(tb, sourceDirectory)
                 run_tb(out)
-            open_wave(first_vcd)
-    elif args.target.startswith("wave-"):
-        name = args.target.split("-", 1)[1]
-        for tb in testBenches:
-            if tb.stem == name:
-                open_wave(tb.with_suffix(".vcd"))
-                break
-        else:
-            print("no such testbench", name)
-    elif args.target == "install":
-        install(pathlib.Path(args.dir))
-    elif args.target == "uninstall":
-        uninstall(pathlib.Path(args.dir))
-    elif args.target == "clean":
-        clean(sourceDirectory)
-    else:
-        parser.print_help()
+        case "waveform":
+            # replicate Makefile behaviour: build & run first TB if needed
+            if testBenches:
+                tb = testBenches[0]
+                first_vcd = tb.with_suffix(".vcd")
+                out = tb.with_suffix(".out")
+                if not first_vcd.exists():
+                    # compile and run the tb to generate the VCD
+                    if not out.exists():
+                        compile_tb(tb, sourceDirectory)
+                    run_tb(out)
+                open_wave(first_vcd)
+        case _ if args.target.startswith("wave-"):
+            name = args.target.split("-", 1)[1]
+            for tb in testBenches:
+                if tb.stem == name:
+                    open_wave(tb.with_suffix(".vcd"))
+                    break
+            else:
+                print("no such testbench", name)
+        case "install":
+            install(pathlib.Path(args.dir))
+        case "uninstall":
+            uninstall(pathlib.Path(args.dir))
+        case "clean":
+            clean(sourceDirectory)
+        case _:
+            parser.print_help()
 
 if __name__ == "__main__":
     main()

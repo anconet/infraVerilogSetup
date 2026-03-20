@@ -50,3 +50,5 @@ if [[ ! -f "/usr/local/bin/verible-verilog-format" ]]; then
     sudo tar -C /usr/local --strip-components 1 -xf $VERIBLE_TAR
 fi
 rm $VERIBLE_TAR
+
+alias build='./build.py'
