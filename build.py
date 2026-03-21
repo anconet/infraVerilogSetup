@@ -76,6 +76,20 @@ class IncludeConfig(TypedDict):
     """Schema for <testbench>.include config files."""
     include: list[str]
 
+    @staticmethod
+    def validateIncludeConfig(rawConfig: object) -> "IncludeConfig":
+        """Validate and return include config with runtime type checks."""
+        if not isinstance(rawConfig, dict):
+            raise ValueError("include config must contain a JSON object")
+
+        includeEntries = rawConfig.get("include")
+        if not isinstance(includeEntries, list) or not all(isinstance(item, str) for item in includeEntries):
+            raise ValueError("include config key 'include' must be a list[str]")
+
+        return {
+            "include": includeEntries,
+        }
+
 
 TargetName = Literal["compile", "simulate", "waveform", "clean", "install", "uninstall"]
 
@@ -131,10 +145,11 @@ def getIncludeFiles(testBench: pathlib.Path) -> list[str]:
         print(f"no include file found for {testBench} (tried suffixes: {getIncludeSuffixes()})")
         sys.exit(1)
     with open(includeFile, 'r') as f:
-        includeConfig = cast(IncludeConfig, json.load(f))
-
-    if not isinstance(includeConfig, dict) or not isinstance(includeConfig.get("include"), list):
-        print(f"invalid include config format in {includeFile}")
+        rawConfig: object = json.load(f)
+    try:
+        includeConfig = IncludeConfig.validateIncludeConfig(rawConfig)
+    except ValueError as error:
+        print(f"invalid include config format in {includeFile}: {error}")
         sys.exit(1)
 
     includeEntries = includeConfig["include"]
@@ -163,6 +178,7 @@ def compileTestbench(testBench: pathlib.Path, sourceDirectory: pathlib.Path) -> 
     """
     out = testBench.with_suffix(".out")
     vcd = testBench.with_suffix(".vcd")
+    
     sources = getIncludeFiles(testBench)
 
     # include the VCD filename quoted, similar to how the Makefile did it
