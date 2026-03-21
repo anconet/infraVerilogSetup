@@ -15,29 +15,98 @@ import pathlib
 import shutil
 import subprocess
 import sys
+from typing import Literal, TypedDict, cast
 
-def getBuildConfig():
+
+class InstallConfig(TypedDict):
+    """Schema for install.config.json."""
+    frameworkFiles: list[str]
+
+    @staticmethod
+    def validateInstallConfig(rawConfig: object) -> "InstallConfig":
+        """Validate and return install config with runtime type checks."""
+        if not isinstance(rawConfig, dict):
+            raise ValueError("install.config.json must contain a JSON object")
+
+        frameworkFiles = rawConfig.get("frameworkFiles")
+        if not isinstance(frameworkFiles, list) or not all(isinstance(item, str) for item in frameworkFiles):
+            raise ValueError("install.config.json key 'frameworkFiles' must be a list[str]")
+
+        return {
+            "frameworkFiles": frameworkFiles,
+        }
+
+
+class BuildConfig(TypedDict):
+    """Schema for build.config.json."""
+    sourceDirectory: str
+    verilogSuffixes: list[str]
+    testbenchSuffixes: list[str]
+    includeSuffixes: list[str]
+
+    @staticmethod
+    def validateBuildConfig(rawConfig: object) -> "BuildConfig":
+        """Validate and return build config with runtime type checks."""
+        if not isinstance(rawConfig, dict):
+            raise ValueError("build.config.json must contain a JSON object")
+
+        sourceDirectory = rawConfig.get("sourceDirectory")
+        verilogSuffixes = rawConfig.get("verilogSuffixes")
+        testbenchSuffixes = rawConfig.get("testbenchSuffixes")
+        includeSuffixes = rawConfig.get("includeSuffixes")
+
+        if not isinstance(sourceDirectory, str):
+            raise ValueError("build.config.json key 'sourceDirectory' must be a string")
+        if not isinstance(verilogSuffixes, list) or not all(isinstance(item, str) for item in verilogSuffixes):
+            raise ValueError("build.config.json key 'verilogSuffixes' must be a list[str]")
+        if not isinstance(testbenchSuffixes, list) or not all(isinstance(item, str) for item in testbenchSuffixes):
+            raise ValueError("build.config.json key 'testbenchSuffixes' must be a list[str]")
+        if not isinstance(includeSuffixes, list) or not all(isinstance(item, str) for item in includeSuffixes):
+            raise ValueError("build.config.json key 'includeSuffixes' must be a list[str]")
+
+        return {
+            "sourceDirectory": sourceDirectory,
+            "verilogSuffixes": verilogSuffixes,
+            "testbenchSuffixes": testbenchSuffixes,
+            "includeSuffixes": includeSuffixes,
+        }
+
+
+class IncludeConfig(TypedDict):
+    """Schema for <testbench>.include config files."""
+    include: list[str]
+
+
+TargetName = Literal["compile", "simulate", "waveform", "clean", "install", "uninstall"]
+
+
+def getBuildConfig() -> BuildConfig:
     with open('build.config.json', 'r') as f:
-        return json.load(f)
+        rawConfig: object = json.load(f)
+    try:
+        return BuildConfig.validateBuildConfig(rawConfig)
+    except ValueError as error:
+        print(f"invalid build config: {error}")
+        sys.exit(1)
 
 
-def getSourceDirectory():
+def getSourceDirectory() -> pathlib.Path:
     return pathlib.Path(getBuildConfig()['sourceDirectory'])
 
 
-def getTestbenchSuffixes():
+def getTestbenchSuffixes() -> list[str]:
     return getBuildConfig().get('testbenchSuffixes', ['_tb', '.test'])
 
 
-def getIncludeSuffixes():
+def getIncludeSuffixes() -> list[str]:
     return getBuildConfig().get('includeSuffixes', ['.include.json'])
 
 
-def getVerilogSuffixes():
+def getVerilogSuffixes() -> list[str]:
     return getBuildConfig().get('verilogSuffixes', ['.sv', '.v'])
 
 
-def getSources(sourceDirectory: pathlib.Path):
+def getSources(sourceDirectory: pathlib.Path) -> list[pathlib.Path]:
     # rglob returns generators; concatenate by converting each to a list first
     sources = []
     for suffix in getVerilogSuffixes():
@@ -45,21 +114,13 @@ def getSources(sourceDirectory: pathlib.Path):
     return sources
 
 
-def findTestbenches(sourceDirectory: pathlib.Path, patterns: list = None):
+def findTestbenches(sourceDirectory: pathlib.Path, patterns: list[str] | None = None) -> list[pathlib.Path]:
     if patterns is None:
         patterns = getTestbenchSuffixes()
     return [p for p in getSources(sourceDirectory) if any(pat in p.name for pat in patterns)]
 
 
-def compileTestbench(testBench: pathlib.Path, sourceDirectory: pathlib.Path):
-    """Compile a testbench along with every other source file.
-
-    This mirrors the Makefile which uses all of $(SRCS) as inputs so that
-    modules defined in other files (e.g. counter_4bit.v) are visible when
-    elaborating the testbench.
-    """
-    out = testBench.with_suffix(".out")
-    vcd = testBench.with_suffix(".vcd")
+def getIncludeFiles(testBench: pathlib.Path) -> list[str]:
     includeFile = None
     for suffix in getIncludeSuffixes():
         candidate = testBench.parent / (testBench.stem + suffix)
@@ -70,7 +131,7 @@ def compileTestbench(testBench: pathlib.Path, sourceDirectory: pathlib.Path):
         print(f"no include file found for {testBench} (tried suffixes: {getIncludeSuffixes()})")
         sys.exit(1)
     with open(includeFile, 'r') as f:
-        includeConfig = json.load(f)
+        includeConfig = cast(IncludeConfig, json.load(f))
 
     if not isinstance(includeConfig, dict) or not isinstance(includeConfig.get("include"), list):
         print(f"invalid include config format in {includeFile}")
@@ -78,17 +139,31 @@ def compileTestbench(testBench: pathlib.Path, sourceDirectory: pathlib.Path):
 
     includeEntries = includeConfig["include"]
 
-    sources = []
+    includeFiles = []
     for entry in includeEntries:
         p = pathlib.Path(entry)
         if not p.is_absolute():
             p = testBench.parent / p
-        sources.append(str(p))
+        includeFiles.append(str(p))
 
     # Ensure the testbench itself is present once, even if omitted from include config.
     tbPath = str(testBench)
-    if tbPath not in sources:
-        sources.append(tbPath)
+    if tbPath not in includeFiles:
+        includeFiles.append(tbPath)
+
+    return includeFiles
+
+
+def compileTestbench(testBench: pathlib.Path, sourceDirectory: pathlib.Path) -> pathlib.Path:
+    """Compile a testbench along with every other source file.
+
+    This mirrors the Makefile which uses all of $(SRCS) as inputs so that
+    modules defined in other files (e.g. counter_4bit.v) are visible when
+    elaborating the testbench.
+    """
+    out = testBench.with_suffix(".out")
+    vcd = testBench.with_suffix(".vcd")
+    sources = getIncludeFiles(testBench)
 
     # include the VCD filename quoted, similar to how the Makefile did it
     cmd = (
@@ -106,7 +181,7 @@ def compileTestbench(testBench: pathlib.Path, sourceDirectory: pathlib.Path):
     return out
 
 
-def runTb(out: pathlib.Path):
+def runTb(out: pathlib.Path) -> None:
     cmd = [
         "vvp",
         str(out),
@@ -115,7 +190,7 @@ def runTb(out: pathlib.Path):
     subprocess.check_call(cmd)
 
 
-def openWave(vcd: pathlib.Path):
+def openWave(vcd: pathlib.Path) -> None:
     cmd = [
         "gtkwave",
         str(vcd),
@@ -124,20 +199,25 @@ def openWave(vcd: pathlib.Path):
     subprocess.check_call(cmd)
 
 
-def checkInstallConfigJson():
+def checkInstallConfigJson() -> None:
     if pathlib.Path("install.config.json").exists() == False:
         print("install.config.json not found")
         print("This likely means you are trying to run the install or uninstall option from the directory that that the framework was installed into.")
         sys.exit(1)
 
 
-def getFrameworkFiles():
+def getFrameworkFiles() -> list[str]:
     with open('install.config.json', 'r') as f:
-        installConfig = json.load(f)
-    return installConfig['frameworkFiles']
+        rawConfig: object = json.load(f)
+    try:
+        installConfig = InstallConfig.validateInstallConfig(rawConfig)
+        return installConfig['frameworkFiles']
+    except ValueError as error:
+        print(f"invalid install config: {error}")
+        sys.exit(1)
 
 
-def install(installDirectory: pathlib.Path):
+def install(installDirectory: pathlib.Path) -> None:
 
     checkInstallConfigJson()
 
@@ -156,7 +236,7 @@ def install(installDirectory: pathlib.Path):
     print("installed to", installDirectory)
 
 
-def uninstall(installDirectory: pathlib.Path):
+def uninstall(installDirectory: pathlib.Path) -> None:
     checkInstallConfigJson()
     
     frameworkFiles = getFrameworkFiles()
@@ -175,7 +255,7 @@ def uninstall(installDirectory: pathlib.Path):
     print("uninstalled from", installDirectory)
 
 
-def clean(sourceDirectory: pathlib.Path):
+def clean(sourceDirectory: pathlib.Path) -> None:
     for testBench in findTestbenches(sourceDirectory):
         outFile = testBench.with_suffix(".out")
         vcdFile = testBench.with_suffix(".vcd")
@@ -185,7 +265,7 @@ def clean(sourceDirectory: pathlib.Path):
     print("clean complete")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Python build script for verilog project")
     parser.add_argument("target", nargs="?", default="compile", help="one of compile, simulate, waveform, clean, install, uninstall")
     parser.add_argument("--dir", default="..", help="installation directory")
@@ -195,11 +275,13 @@ def main():
 
     testBenches = findTestbenches(sourceDirectory)
 
-    if not testBenches and args.target in ("compile", "simulate", "waveform"):
+    target = cast(TargetName | str, args.target)
+
+    if not testBenches and target in ("compile", "simulate", "waveform"):
         print("no testbenches found")
         sys.exit(1)
 
-    match args.target:
+    match target:
         case "compile":
             for testBench in testBenches:
                 compileTestbench(testBench, sourceDirectory)
@@ -221,8 +303,8 @@ def main():
                         compileTestbench(testBench, sourceDirectory)
                     runTb(out)
                 openWave(firstVcd)
-        case _ if args.target.startswith("wave-"):
-            name = args.target.split("-", 1)[1]
+        case _ if target.startswith("wave-"):
+            name = target.split("-", 1)[1]
             for testBench in testBenches:
                 if testBench.stem == name:
                     openWave(testBench.with_suffix(".vcd"))
