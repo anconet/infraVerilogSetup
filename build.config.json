@@ -1,5 +1,9 @@
 {
     "sourceDirectory": "source",
+    "verilogSuffixes": [
+        ".sv",
+        ".v"
+    ],
     "testbenchSuffixes": [
         "_tb",
         ".test"
