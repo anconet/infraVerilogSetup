@@ -15,6 +15,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import time
 from typing import Literal, TypedDict, cast
 
 
@@ -91,7 +92,7 @@ class IncludeConfig(TypedDict):
         }
 
 
-TargetName = Literal["compile", "simulate", "waveform", "clean", "install", "uninstall"]
+TargetName = Literal["compile", "simulate", "waveform", "watch", "clean", "install", "uninstall"]
 
 
 def getBuildConfig() -> BuildConfig:
@@ -120,7 +121,8 @@ def getVerilogSuffixes() -> list[str]:
     return getBuildConfig().get('verilogSuffixes', ['.sv', '.v'])
 
 
-def getSources(sourceDirectory: pathlib.Path) -> list[pathlib.Path]:
+def getSources() -> list[pathlib.Path]:
+    sourceDirectory = getSourceDirectory()
     # rglob returns generators; concatenate by converting each to a list first
     sources = []
     for suffix in getVerilogSuffixes():
@@ -128,19 +130,27 @@ def getSources(sourceDirectory: pathlib.Path) -> list[pathlib.Path]:
     return sources
 
 
-def findTestbenches(sourceDirectory: pathlib.Path, patterns: list[str] | None = None) -> list[pathlib.Path]:
+def getTestbenches(patterns: list[str] | None = None) -> list[pathlib.Path]:
     if patterns is None:
         patterns = getTestbenchSuffixes()
-    return [p for p in getSources(sourceDirectory) if any(pat in p.name for pat in patterns)]
+    testBenches: list[pathlib.Path] = []
+    for sourcePath in getSources():
+        if any(pat in sourcePath.name for pat in patterns):
+            testBenches.append(sourcePath)
+    return testBenches
 
 
-def getIncludeFiles(testBench: pathlib.Path) -> list[str]:
-    includeFile = None
+def findIncludeConfigFile(testBench: pathlib.Path) -> pathlib.Path | None:
+    """Return the existing include config path for a testbench, if present."""
     for suffix in getIncludeSuffixes():
         candidate = testBench.parent / (testBench.stem + suffix)
         if candidate.exists():
-            includeFile = candidate
-            break
+            return candidate
+    return None
+
+
+def getIncludeFiles(testBench: pathlib.Path) -> list[str]:
+    includeFile = findIncludeConfigFile(testBench)
     if includeFile is None:
         print(f"no include file found for {testBench} (tried suffixes: {getIncludeSuffixes()})")
         sys.exit(1)
@@ -169,7 +179,7 @@ def getIncludeFiles(testBench: pathlib.Path) -> list[str]:
     return includeFiles
 
 
-def compileTestbench(testBench: pathlib.Path, sourceDirectory: pathlib.Path) -> pathlib.Path:
+def compileTestbench(testBench: pathlib.Path) -> pathlib.Path:
     """Compile a testbench along with every other source file.
 
     This mirrors the Makefile which uses all of $(SRCS) as inputs so that
@@ -197,7 +207,7 @@ def compileTestbench(testBench: pathlib.Path, sourceDirectory: pathlib.Path) -> 
     return out
 
 
-def runTb(out: pathlib.Path) -> None:
+def simulateTestBench(out: pathlib.Path) -> None:
     cmd = [
         "vvp",
         str(out),
@@ -271,8 +281,8 @@ def uninstall(installDirectory: pathlib.Path) -> None:
     print("uninstalled from", installDirectory)
 
 
-def clean(sourceDirectory: pathlib.Path) -> None:
-    for testBench in findTestbenches(sourceDirectory):
+def clean() -> None:
+    for testBench in getTestbenches():
         outFile = testBench.with_suffix(".out")
         vcdFile = testBench.with_suffix(".vcd")
         for file in (outFile, vcdFile):
@@ -281,32 +291,112 @@ def clean(sourceDirectory: pathlib.Path) -> None:
     print("clean complete")
 
 
+def getAssociatedTestBenches(changedSourceFile: pathlib.Path, testBenches: list[pathlib.Path]) -> list[pathlib.Path]:
+    """Return testbenches affected by a changed source, testbench, or include config file."""
+    changedSourceResolved = changedSourceFile.resolve()
+    associatedTestBenches: list[pathlib.Path] = []
+    for testBench in testBenches:
+        testBenchResolved = testBench.resolve()
+        if changedSourceResolved == testBenchResolved:
+            associatedTestBenches.append(testBench)
+            continue
+
+        includeConfigFile = findIncludeConfigFile(testBench)
+        if includeConfigFile is not None and changedSourceResolved == includeConfigFile.resolve():
+            associatedTestBenches.append(testBench)
+            continue
+
+        includeFiles: list[pathlib.Path] = []
+        for includePath in getIncludeFiles(testBench):
+            includeFiles.append(pathlib.Path(includePath).resolve())
+        # getIncludeFiles includes the testbench itself; we only care about non-testbench dependencies.
+        dependencyFiles: list[pathlib.Path] = []
+        for includePath in includeFiles:
+            if includePath != testBenchResolved:
+                dependencyFiles.append(includePath)
+        if changedSourceResolved in dependencyFiles:
+            associatedTestBenches.append(testBench)
+    return associatedTestBenches
+
+
+def watch() -> None:
+    """Watch source, testbench, and include config files and rebuild affected testbenches on save."""
+    testBenches = getTestbenches()
+    watchedSources = getSources()
+    includeConfigFiles: list[pathlib.Path] = []
+    for testBench in testBenches:
+        includeConfigPath = findIncludeConfigFile(testBench)
+        if includeConfigPath is not None:
+            includeConfigFiles.append(includeConfigPath)
+    watchedPaths = watchedSources + includeConfigFiles
+    sourceMtimes: dict[pathlib.Path, float] = {}
+    for sourceFile in watchedPaths:
+        if sourceFile.exists():
+            sourceMtimes[sourceFile] = sourceFile.stat().st_mtime
+
+    print(f"watching {len(watchedPaths)} files for changes...")
+    while True:
+        time.sleep(1.0)
+        testBenches = getTestbenches()
+        currentSources = getSources()
+        currentIncludeConfigFiles: list[pathlib.Path] = []
+        for testBench in testBenches:
+            includeConfigPath = findIncludeConfigFile(testBench)
+            if includeConfigPath is not None:
+                currentIncludeConfigFiles.append(includeConfigPath)
+        currentWatchedPaths = currentSources + currentIncludeConfigFiles
+        for sourceFile in currentWatchedPaths:
+            if sourceFile.exists() and sourceFile not in sourceMtimes:
+                sourceMtimes[sourceFile] = sourceFile.stat().st_mtime
+
+        changedSources: list[pathlib.Path] = []
+        for sourceFile in currentWatchedPaths:
+            if not sourceFile.exists():
+                continue
+            currentMtime = sourceFile.stat().st_mtime
+            lastMtime = sourceMtimes.get(sourceFile)
+            if lastMtime is None:
+                sourceMtimes[sourceFile] = currentMtime
+                continue
+            if currentMtime > lastMtime:
+                sourceMtimes[sourceFile] = currentMtime
+                changedSources.append(sourceFile)
+
+        for changedSourceFile in changedSources:
+            associatedTestBenches = getAssociatedTestBenches(changedSourceFile, testBenches)
+            if not associatedTestBenches:
+                continue
+            print(f"change detected: {changedSourceFile}")
+            for testBench in associatedTestBenches:
+                print(f"rebuilding and simulating {testBench}")
+                outFile = compileTestbench(testBench)
+                simulateTestBench(outFile)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Python build script for verilog project")
-    parser.add_argument("target", nargs="?", default="compile", help="one of compile, simulate, waveform, clean, install, uninstall")
+    parser.add_argument("target", nargs="?", default="compile", help="one of compile, simulate, waveform, watch, clean, install, uninstall")
     parser.add_argument("--dir", default="..", help="installation directory")
     args = parser.parse_args()
 
-    sourceDirectory = getSourceDirectory()
-
-    testBenches = findTestbenches(sourceDirectory)
-
     target = cast(TargetName | str, args.target)
 
-    if not testBenches and target in ("compile", "simulate", "waveform"):
+    testBenches = getTestbenches()
+
+    if not testBenches and target in ("compile", "simulate", "waveform", "watch"):
         print("no testbenches found")
         sys.exit(1)
 
     match target:
         case "compile":
             for testBench in testBenches:
-                compileTestbench(testBench, sourceDirectory)
+                compileTestbench(testBench)
         case "simulate":
             for testBench in testBenches:
                 out = testBench.with_suffix(".out")
                 if not out.exists():
-                    compileTestbench(testBench, sourceDirectory)
-                runTb(out)
+                    compileTestbench(testBench)
+                simulateTestBench(out)
         case "waveform":
             # replicate Makefile behaviour: build & run first TB if needed
             if testBenches:
@@ -316,13 +406,21 @@ def main() -> None:
                 if not firstVcd.exists():
                     # compile and run the tb to generate the VCD
                     if not out.exists():
-                        compileTestbench(testBench, sourceDirectory)
-                    runTb(out)
+                        compileTestbench(testBench)
+                    simulateTestBench(out)
                 openWave(firstVcd)
+        case "watch":
+            watch()
         case _ if target.startswith("wave-"):
             name = target.split("-", 1)[1]
             for testBench in testBenches:
-                if testBench.stem == name:
+                candidateNames = {
+                    testBench.stem,
+                    testBench.name,
+                    str(testBench),
+                    testBench.as_posix(),
+                }
+                if name in candidateNames:
                     openWave(testBench.with_suffix(".vcd"))
                     break
             else:
@@ -332,7 +430,7 @@ def main() -> None:
         case "uninstall":
             uninstall(pathlib.Path(args.dir))
         case "clean":
-            clean(sourceDirectory)
+            clean()
         case _:
             parser.print_help()
 
