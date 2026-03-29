@@ -122,6 +122,7 @@ def getVerilogSuffixes() -> list[str]:
 
 
 def getSources() -> list[pathlib.Path]:
+    """Return all source files in the source directory with the specified verilog suffixes."""
     sourceDirectory = getSourceDirectory()
     # rglob returns generators; concatenate by converting each to a list first
     sources = []
@@ -131,6 +132,7 @@ def getSources() -> list[pathlib.Path]:
 
 
 def getTestbenches(patterns: list[str] | None = None) -> list[pathlib.Path]:
+    """Return all testbench files in the source directory matching the specified testbench identification patterns."""
     if patterns is None:
         patterns = getTestbenchSuffixes()
     testBenches: list[pathlib.Path] = []
@@ -143,13 +145,14 @@ def getTestbenches(patterns: list[str] | None = None) -> list[pathlib.Path]:
 def findIncludeConfigFile(testBench: pathlib.Path) -> pathlib.Path | None:
     """Return the existing include config path for a testbench, if present."""
     for suffix in getIncludeSuffixes():
-        candidate = testBench.parent / (testBench.stem + suffix)
+        candidate = testBench.parent.joinpath(testBench.stem + suffix)
         if candidate.exists():
             return candidate
     return None
 
 
 def getIncludeFiles(testBench: pathlib.Path) -> list[str]:
+    """Return the list of source files to include when compiling a testbench, as specified by the testbench's include config file."""
     includeFile = findIncludeConfigFile(testBench)
     if includeFile is None:
         print(f"no include file found for {testBench} (tried suffixes: {getIncludeSuffixes()})")
@@ -168,7 +171,7 @@ def getIncludeFiles(testBench: pathlib.Path) -> list[str]:
     for entry in includeEntries:
         p = pathlib.Path(entry)
         if not p.is_absolute():
-            p = testBench.parent / p
+            p = testBench.parent.joinpath(p)
         includeFiles.append(str(p))
 
     # Ensure the testbench itself is present once, even if omitted from include config.
@@ -252,12 +255,12 @@ def install(installDirectory: pathlib.Path) -> None:
     installDirectory.mkdir(parents=True, exist_ok=True)
     for item in frameworkFiles:
         src = pathlib.Path(item)
-        dest = installDirectory / src.name
+        dest = installDirectory.joinpath(src.name)
         if src.is_dir():
             shutil.copytree(src, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git", "*.out", "*.vcd", "*.gtkw", "*.sav"))
         else:
             shutil.copy2(src, dest)
-    with open(installDirectory / ".verilog_framework_installed", "w") as f:
+    with open(installDirectory.joinpath(".verilog_framework_installed"), "w") as f:
         f.write("\n".join(frameworkFiles))
     print("installed to", installDirectory)
 
@@ -268,14 +271,14 @@ def uninstall(installDirectory: pathlib.Path) -> None:
     frameworkFiles = getFrameworkFiles()
     
     for item in frameworkFiles:
-        target = installDirectory / item
+        target = installDirectory.joinpath(item)
         if target.exists():
             if target.is_dir():
                 shutil.rmtree(target)
             else:
                 target.unlink()
     try:
-        (installDirectory / ".verilog_framework_installed").unlink()
+        installDirectory.joinpath(".verilog_framework_installed").unlink()
     except FileNotFoundError:
         pass
     print("uninstalled from", installDirectory)
