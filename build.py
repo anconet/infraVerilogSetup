@@ -310,7 +310,12 @@ def getAssociatedTestBenches(changedSourceFile: pathlib.Path, testBenches: list[
             continue
 
         includeFiles: list[pathlib.Path] = []
-        for includePath in getIncludeFiles(testBench):
+        try:
+            includePaths = getIncludeFiles(testBench)
+        except SystemExit:
+            print(f"skipping testbench during watch due to invalid include config: {testBench}")
+            continue
+        for includePath in includePaths:
             includeFiles.append(pathlib.Path(includePath).resolve())
         # getIncludeFiles includes the testbench itself; we only care about non-testbench dependencies.
         dependencyFiles: list[pathlib.Path] = []
@@ -372,7 +377,11 @@ def watch() -> None:
             print(f"change detected: {changedSourceFile}")
             for testBench in associatedTestBenches:
                 print(f"rebuilding and simulating {testBench}")
-                outFile = compileTestbench(testBench)
+                try:
+                    outFile = compileTestbench(testBench)
+                except SystemExit:
+                    print(f"skipping testbench due to invalid include config: {testBench}")
+                    continue
                 simulateTestBench(outFile)
 
 
