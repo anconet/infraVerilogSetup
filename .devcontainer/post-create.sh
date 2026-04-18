@@ -51,4 +51,8 @@ if [[ ! -f "/usr/local/bin/verible-verilog-format" ]]; then
 fi
 rm $VERIBLE_TAR
 
-alias build='./build.py'
+# Persist alias for future interactive shells.
+BUILD_ALIAS="alias build='python3 /workspaces/infraVerilogSetupTest/build.py'"
+if ! grep -Fxq "$BUILD_ALIAS" "$HOME/.bashrc"; then
+    echo "$BUILD_ALIAS" >> "$HOME/.bashrc"
+fi
